@@ -256,122 +256,117 @@ fi
 
 ### Make sure that we have a podman wrapper configured
 
-if [ "$inside_container" -eq "0" ]; then
-    verbose "Running outside containers: executing flatpak directly"
-    $flatpak run com.visualstudio.code "${new_args[@]}"
-    exit 0
-fi
-
-podman_wrapper="$HOME/.local/bin/podman-host"
-if [ "$(readlink "$podman_wrapper")" != "$podman_host_sh" ] ; then
-    info "Making $podman_wrapper a link to podman-host.sh"
-    ln -sf "$podman_host_sh" "$podman_wrapper"
-fi
-
-
-settings_json="$HOME/.var/app/com.visualstudio.code/config/Code/User/settings.json"
-
-# Here's where we edit a JSON file with grep and sed...
-
-# Quote regular expression characters - a " in the path would still mess us up
-wrapper_quoted="$(echo "$podman_wrapper" |  sed -r 's@([$.*[\\^])@\\\1@g')"
-
-if [ ! -f "$settings_json" ] ; then
-    info "Creating $settings_json"
-
-    mkdir -p "$(dirname "$settings_json")"
-    cat > "$settings_json" <<EOF
+if [ "$inside_container" -eq "1" ]; then
+  podman_wrapper="$HOME/.local/bin/podman-host"
+  if [ "$(readlink "$podman_wrapper")" != "$podman_host_sh" ] ; then
+      info "Making $podman_wrapper a link to podman-host.sh"
+      ln -sf "$podman_host_sh" "$podman_wrapper"
+  fi
+  
+  
+  settings_json="$HOME/.var/app/com.visualstudio.code/config/Code/User/settings.json"
+  
+  # Here's where we edit a JSON file with grep and sed...
+  
+  # Quote regular expression characters - a " in the path would still mess us up
+  wrapper_quoted="$(echo "$podman_wrapper" |  sed -r 's@([$.*[\\^])@\\\1@g')"
+  
+  if [ ! -f "$settings_json" ] ; then
+      info "Creating $settings_json"
+  
+      mkdir -p "$(dirname "$settings_json")"
+      cat > "$settings_json" <<EOF
 {
   "dev.containers.dockerPath": "$podman_wrapper"
 }
 EOF
-elif ! grep -q '"dev\.containers\.dockerPath": *"'"$wrapper_quotedXX"'"' "$settings_json" ; then
-    if ! grep -q '"dev\.containers\.dockerPath"' "$settings_json" ; then
-        info "Editing $settings_json to add dev.containers.dockerPath"
-        sed -i '1s@{@{\n    "dev.containers.dockerPath": "'"$podman_wrapper"'",@' \
-            "$settings_json"
-    else
-        info "Editing $settings_json to update dev.containers.dockerPath"
-        sed -i -r 's@("dev.containers.dockerPath": *")[^"]*@\1'"$podman_wrapper"'@' \
-            "$settings_json"
-    fi
-else
-    verbose "Keeping existing $settings_json as it already has correct docker path"
-fi
-
-### See where VSCode is going to write machine specific config/data
-
-# VSCode puts its .vscode-server directory in the value of $HOME
-# determined by 'podman inspect <container>'. For toolboxes, three
-# values have been seen, depending on podman version.
-#
-#  /root
-#  /
-#  User's homedir
-#
-# The first two are OK - we just need to make them world-writable,
-# but for the third, we need ot create a symlink to avoid having
-# different toolboxes step on each other.
-
-homevar="$(flatpak-spawn --host podman inspect "$container_name" \
-    --format='{{ range .Config.Env }}{{ println . }}{{ end }}' \
-    | grep ^HOME=)"
-homevar="${homevar#HOME=}"
-
-case $homevar in
-    /)
-        vscode_server="/.vscode-server"
-        ;;
-    /root)
-        vscode_server="/root/.vscode-server"
-        ;;
-    "$HOME")
-        vscode_server="/.vscode-server"
-
-        if [ -e "$HOME/.vscode-server" ] && [ ! -L "$HOME/.vscode-server" ] ; then
-            echo "$HOME/.vscode-server is not a symlink - this is probably a left-over." 1>&2
-            echo "Please delete this directory and re-run." 1>&2
-            exit 1
-        fi
-        if [ "$(readlink "$HOME/.vscode-server")" != $vscode_server ] ; then
-            info "Creating symlink from $HOME/.vscode-server to /.vscode-server"
-            ln -T -sf $vscode_server "$HOME/.vscode-server"
-        fi
-    ;;
-    *)
-        echo "\$HOME in container config is: '$homevar' - don't know how to handle this." 1>&2
-        exit 1
-    ;;
-esac
-
-### Make sure that we have a writeable-by-user .vscode-server directory
-
-if [ ! -w $vscode_server ] ; then
-    info "Creating $vscode_server"
-    if [ $vscode_server = /root/.vscode-server ] ; then
-        sudo chmod a+x /root
-    fi
-    sudo mkdir -p $vscode_server
-    sudo chown $UID:"$(id -g)" $vscode_server
-fi
-
-### Make sure we have a visual-studio code configuration for this container
-
-global_storage="$HOME/.var/app/com.visualstudio.code/config/Code/User/globalStorage"
-name_config="$global_storage/ms-vscode-remote.remote-containers/nameConfigs/$container_name.json"
-if $toolbox_reset_configuration || [ ! -f "$name_config" ] ; then
-    # The reason for including $PATH in remoteEnv is so that any path modifications
-    # set up in ~/.bashrc / ~/.bash_profile are present in the environment where
-    # vscode runs commands, not just in the interactive terminal. As a special case
-    # we remove any Python virtualenv path, in case this script is being invoked
-    # within a virtual env.
-    if [ -n "$VIRTUAL_ENV" ] ; then
-        path_remove "$VIRTUAL_ENV/bin"
-    fi
-
-    info "Creating configuration for $container_name"
-    mkdir -p "$(dirname "$name_config")"
-    cat > "$name_config" <<EOF
+  elif ! grep -q '"dev\.containers\.dockerPath": *"'"$wrapper_quotedXX"'"' "$settings_json" ; then
+      if ! grep -q '"dev\.containers\.dockerPath"' "$settings_json" ; then
+          info "Editing $settings_json to add dev.containers.dockerPath"
+          sed -i '1s@{@{\n    "dev.containers.dockerPath": "'"$podman_wrapper"'",@' \
+              "$settings_json"
+      else
+          info "Editing $settings_json to update dev.containers.dockerPath"
+          sed -i -r 's@("dev.containers.dockerPath": *")[^"]*@\1'"$podman_wrapper"'@' \
+              "$settings_json"
+      fi
+  else
+      verbose "Keeping existing $settings_json as it already has correct docker path"
+  fi
+  
+  ### See where VSCode is going to write machine specific config/data
+  
+  # VSCode puts its .vscode-server directory in the value of $HOME
+  # determined by 'podman inspect <container>'. For toolboxes, three
+  # values have been seen, depending on podman version.
+  #
+  #  /root
+  #  /
+  #  User's homedir
+  #
+  # The first two are OK - we just need to make them world-writable,
+  # but for the third, we need ot create a symlink to avoid having
+  # different toolboxes step on each other.
+  
+  homevar="$(flatpak-spawn --host podman inspect "$container_name" \
+      --format='{{ range .Config.Env }}{{ println . }}{{ end }}' \
+      | grep ^HOME=)"
+  homevar="${homevar#HOME=}"
+  
+  case $homevar in
+      /)
+          vscode_server="/.vscode-server"
+          ;;
+      /root)
+          vscode_server="/root/.vscode-server"
+          ;;
+      "$HOME")
+          vscode_server="/.vscode-server"
+  
+          if [ -e "$HOME/.vscode-server" ] && [ ! -L "$HOME/.vscode-server" ] ; then
+              echo "$HOME/.vscode-server is not a symlink - this is probably a left-over." 1>&2
+              echo "Please delete this directory and re-run." 1>&2
+              exit 1
+          fi
+          if [ "$(readlink "$HOME/.vscode-server")" != $vscode_server ] ; then
+              info "Creating symlink from $HOME/.vscode-server to /.vscode-server"
+              ln -T -sf $vscode_server "$HOME/.vscode-server"
+          fi
+      ;;
+      *)
+          echo "\$HOME in container config is: '$homevar' - don't know how to handle this." 1>&2
+          exit 1
+      ;;
+  esac
+  
+  ### Make sure that we have a writeable-by-user .vscode-server directory
+  
+  if [ ! -w $vscode_server ] ; then
+      info "Creating $vscode_server"
+      if [ $vscode_server = /root/.vscode-server ] ; then
+          sudo chmod a+x /root
+      fi
+      sudo mkdir -p $vscode_server
+      sudo chown $UID:"$(id -g)" $vscode_server
+  fi
+  
+  ### Make sure we have a visual-studio code configuration for this container
+  
+  global_storage="$HOME/.var/app/com.visualstudio.code/config/Code/User/globalStorage"
+  name_config="$global_storage/ms-vscode-remote.remote-containers/nameConfigs/$container_name.json"
+  if $toolbox_reset_configuration || [ ! -f "$name_config" ] ; then
+      # The reason for including $PATH in remoteEnv is so that any path modifications
+      # set up in ~/.bashrc / ~/.bash_profile are present in the environment where
+      # vscode runs commands, not just in the interactive terminal. As a special case
+      # we remove any Python virtualenv path, in case this script is being invoked
+      # within a virtual env.
+      if [ -n "$VIRTUAL_ENV" ] ; then
+          path_remove "$VIRTUAL_ENV/bin"
+      fi
+  
+      info "Creating configuration for $container_name"
+      mkdir -p "$(dirname "$name_config")"
+      cat > "$name_config" <<EOF
 {
   // Support requested in https://github.com/microsoft/vscode-remote-release/issues/4053.
   // "name": "Toolbox $container_name",
@@ -381,21 +376,21 @@ if $toolbox_reset_configuration || [ ! -f "$name_config" ] ; then
   }
 }
 EOF
-fi
-
-### Make sure that we have an appropriate settings.json in the container
-
-# There's a settings key in the attached-container configuration file, documented
-# as "Adds default settings.json values into a container/machine specific settings file",
-# but if the user adds any settings for the container, the settings-key in the
-# attached-container configuration file is overwritten without merging.
-
-settings="$vscode_server/data/Machine/settings.json"
-if $toolbox_reset_configuration || [ ! -f $settings ] ; then
-    info "Creating $settings"
-
-    mkdir -p "$(dirname $settings)"
-    cat > $settings <<EOF
+  fi
+  
+  ### Make sure that we have an appropriate settings.json in the container
+  
+  # There's a settings key in the attached-container configuration file, documented
+  # as "Adds default settings.json values into a container/machine specific settings file",
+  # but if the user adds any settings for the container, the settings-key in the
+  # attached-container configuration file is overwritten without merging.
+  
+  settings="$vscode_server/data/Machine/settings.json"
+  if $toolbox_reset_configuration || [ ! -f $settings ] ; then
+      info "Creating $settings"
+  
+      mkdir -p "$(dirname $settings)"
+      cat > $settings <<EOF
 {
   "dev.containers.copyGitConfig": false,
   "dev.containers.gitCredentialHelperConfigLocation": "none",
@@ -416,6 +411,7 @@ if $toolbox_reset_configuration || [ ! -f $settings ] ; then
   }
 }
 EOF
+  fi
 fi
 
 # If there is already a Visual Studio code process running, we want
@@ -454,8 +450,13 @@ existing=$($flatpak ps --columns=instance,application,pid | sort -nr | \
 if [ "$existing" = "" ] ; then
     verbose "No running Visual Studio Code Flatpak, will use 'flatpak run'"
     $verbose && set -x
-    $flatpak run com.visualstudio.code \
-             --remote attached-container+"$container_name_encoded" "${new_args[@]}"
+
+    if [ "$inside_container" -eq "1" ]; then
+        $flatpak run com.visualstudio.code \
+                --remote attached-container+"$container_name_encoded" "${new_args[@]}"
+    else
+        $flatpak run com.visualstudio.code "${new_args[@]}"
+    fi
 else
     verbose "Found running Visual Studio Code Flatpak, will use 'flatpak enter'"
     # flatpak enter tries to read the environment from the running process,
@@ -478,9 +479,18 @@ else
             exec "$@"
     '
     $verbose && set -x
-    $flatpak enter "$existing" sh -c "$script" "$PWD" "$HOME" \
-            /app/extra/vscode/code /app/extra/vscode/resources/app/out/cli.js \
-             --ms-enable-electron-run-as-node \
-            --extensions-dir="$HOME/.var/app/com.visualstudio.code/data/vscode/extensions" \
-             --remote attached-container+"$container_name_encoded" "${new_args[@]}"
+
+    if [ "$inside_container" -eq "1" ]; then
+        $flatpak enter "$existing" sh -c "$script" "$PWD" "$HOME" \
+                /app/extra/vscode/code /app/extra/vscode/resources/app/out/cli.js \
+                --ms-enable-electron-run-as-node \
+                --extensions-dir="$HOME/.var/app/com.visualstudio.code/data/vscode/extensions" \
+                --remote attached-container+"$container_name_encoded" "${new_args[@]}"
+    else
+        $flatpak enter "$existing" sh -c "$script" "$PWD" "$HOME" \
+                /app/extra/vscode/code /app/extra/vscode/resources/app/out/cli.js \
+                --ms-enable-electron-run-as-node \
+                --extensions-dir="$HOME/.var/app/com.visualstudio.code/data/vscode/extensions" \
+                "${new_args[@]}"
+    fi
 fi
