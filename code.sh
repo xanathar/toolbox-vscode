@@ -217,8 +217,8 @@ if $add_new_window ; then
 fi
 
 if test -f /run/.containerenv; then
-# shellcheck disable=SC1091,SC2154
   flatpak="flatpak-spawn --host flatpak"
+  # shellcheck disable=SC1091,SC2154
   container_name="$(. /run/.containerenv && echo "$name")"
   container_name_encoded=$(echo -n "$container_name" | od -t x1 -A none -v | tr -d ' \n')
   inside_container=1
@@ -280,7 +280,7 @@ if [ "$inside_container" -eq "1" ]; then
   "dev.containers.dockerPath": "$podman_wrapper"
 }
 EOF
-  elif ! grep -q '"dev\.containers\.dockerPath": *"'"$wrapper_quotedXX"'"' "$settings_json" ; then
+  elif ! grep -q '"dev\.containers\.dockerPath": *"'"$wrapper_quoted"'"' "$settings_json" ; then
       if ! grep -q '"dev\.containers\.dockerPath"' "$settings_json" ; then
           info "Editing $settings_json to add dev.containers.dockerPath"
           sed -i '1s@{@{\n    "dev.containers.dockerPath": "'"$podman_wrapper"'",@' \
