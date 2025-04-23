@@ -216,10 +216,18 @@ if $add_new_window ; then
     new_args+=("--new-window")
 fi
 
-flatpak="flatpak-spawn --host flatpak"
+if test -f /run/.containerenv; then
 # shellcheck disable=SC1091,SC2154
-container_name="$(. /run/.containerenv && echo "$name")"
-container_name_encoded=$(echo -n "$container_name" | od -t x1 -A none -v | tr -d ' \n')
+  flatpak="flatpak-spawn --host flatpak"
+  container_name="$(. /run/.containerenv && echo "$name")"
+  container_name_encoded=$(echo -n "$container_name" | od -t x1 -A none -v | tr -d ' \n')
+  inside_container=1
+else
+  flatpak="flatpak"
+  container_name=''
+  container_name_encoded=$(echo -n "$container_name" | od -t x1 -A none -v | tr -d ' \n')
+  inside_container=0
+fi
 
 ### Make sure that we have the Visual Studio Code Flatpak installed
 
@@ -248,6 +256,12 @@ fi
 
 ### Make sure that we have a podman wrapper configured
 
+if [ "$inside_container" -eq "0" ]; then
+    verbose "Running outside containers: executing flatpak directly"
+    $flatpak run com.visualstudio.code "${new_args[@]}"
+    exit 0
+fi
+
 podman_wrapper="$HOME/.local/bin/podman-host"
 if [ "$(readlink "$podman_wrapper")" != "$podman_host_sh" ] ; then
     info "Making $podman_wrapper a link to podman-host.sh"
@@ -271,7 +285,7 @@ if [ ! -f "$settings_json" ] ; then
   "dev.containers.dockerPath": "$podman_wrapper"
 }
 EOF
-elif ! grep -q '"dev\.containers\.dockerPath": *"'"$wrapper_quoted"'"' "$settings_json" ; then
+elif ! grep -q '"dev\.containers\.dockerPath": *"'"$wrapper_quotedXX"'"' "$settings_json" ; then
     if ! grep -q '"dev\.containers\.dockerPath"' "$settings_json" ; then
         info "Editing $settings_json to add dev.containers.dockerPath"
         sed -i '1s@{@{\n    "dev.containers.dockerPath": "'"$podman_wrapper"'",@' \
@@ -281,6 +295,8 @@ elif ! grep -q '"dev\.containers\.dockerPath": *"'"$wrapper_quoted"'"' "$setting
         sed -i -r 's@("dev.containers.dockerPath": *")[^"]*@\1'"$podman_wrapper"'@' \
             "$settings_json"
     fi
+else
+    verbose "Keeping existing $settings_json as it already has correct docker path"
 fi
 
 ### See where VSCode is going to write machine specific config/data
